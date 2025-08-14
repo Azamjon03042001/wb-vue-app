@@ -3,7 +3,6 @@ import { ref, computed, onMounted } from "vue";
 import dayjs from "dayjs";
 import { getOrders } from "../services/api";
 
-// Chart.js (столбиковая диаграмма)
 import { Bar } from "vue-chartjs";
 import {
   Chart,
@@ -27,12 +26,12 @@ const error = ref("");
 const raw = ref(null);
 const list = ref([]);
 
-// --- фильтрация/поиск/сортировка ---
 const search = ref("");
 const sortKey = ref("");
-const sortDir = ref("asc"); // 'asc' | 'desc'
+const sortDir = ref("asc");
 
 const keys = computed(() => (list.value[0] ? Object.keys(list.value[0]) : []));
+const isLastPage = computed(() => list.value.length < limit.value);
 
 async function load() {
   loading.value = true;
@@ -61,8 +60,10 @@ function prevPage() {
   }
 }
 function nextPage() {
-  page.value += 1;
-  load();
+  if (!isLastPage.value) {
+    page.value += 1;
+    load();
+  }
 }
 
 function toggleSort(k) {
@@ -76,8 +77,6 @@ function toggleSort(k) {
 
 const rows = computed(() => {
   let arr = list.value;
-
-  // Поиск по всем полям
   const q = search.value.trim().toLowerCase();
   if (q) {
     arr = arr.filter((row) =>
@@ -88,32 +87,26 @@ const rows = computed(() => {
       )
     );
   }
-
-  // Сортировка
   if (sortKey.value) {
     const k = sortKey.value;
     const dir = sortDir.value === "asc" ? 1 : -1;
     arr = [...arr].sort((a, b) => {
-      const va = a?.[k];
-      const vb = b?.[k];
+      const va = a?.[k],
+        vb = b?.[k];
       if (va == null && vb == null) return 0;
       if (va == null) return 1;
       if (vb == null) return -1;
-
-      // аккуратнее с числами-строками
-      const na = Number(va);
-      const nb = Number(vb);
+      const na = Number(va),
+        nb = Number(vb);
       const bothNumeric = !Number.isNaN(na) && !Number.isNaN(nb);
       if (bothNumeric) return (na > nb ? 1 : na < nb ? -1 : 0) * dir;
-
-      // сравнение строк
       return String(va).localeCompare(String(vb)) * dir;
     });
   }
   return arr;
 });
 
-// Данные для графика: сумма total_price по дню (last_change_date либо дата из date)
+// график: сумма total_price по дате; ось X отсортирована
 const chartData = computed(() => {
   const map = new Map();
   for (const r of rows.value) {
@@ -123,17 +116,9 @@ const chartData = computed(() => {
     const val = Number(r?.total_price ?? 0) || 0;
     map.set(day, (map.get(day) ?? 0) + val);
   }
-  const labels = [...map.keys()];
-  const data = [...map.values()];
-  return {
-    labels,
-    datasets: [
-      {
-        label: "Сумма total_price по дню",
-        data,
-      },
-    ],
-  };
+  const labels = [...map.keys()].sort();
+  const data = labels.map((d) => map.get(d));
+  return { labels, datasets: [{ label: "Сумма total_price по дню", data }] };
 });
 
 onMounted(load);
@@ -146,6 +131,29 @@ onMounted(load);
     <div class="filters">
       <label>От: <input type="date" v-model="dateFrom" /></label>
       <label>До: <input type="date" v-model="dateTo" /></label>
+
+      <button
+        @click="
+          dateFrom = dayjs().format('YYYY-MM-DD');
+          dateTo = dayjs().format('YYYY-MM-DD');
+          page = 1;
+          load();
+        "
+      >
+        Сегодня
+      </button>
+
+      <button
+        @click="
+          dateFrom = dayjs().subtract(7, 'day').format('YYYY-MM-DD');
+          dateTo = dayjs().format('YYYY-MM-DD');
+          page = 1;
+          load();
+        "
+      >
+        7 дней
+      </button>
+
       <label>
         Limit:
         <select v-model.number="limit">
@@ -156,6 +164,7 @@ onMounted(load);
           <option :value="500">500</option>
         </select>
       </label>
+
       <input
         class="search"
         placeholder="Поиск…"
@@ -175,11 +184,10 @@ onMounted(load);
       </button>
     </div>
 
-    <p v-if="loading">Загрузка…</p>
+    <p v-if="loading" class="spinner">Загрузка…</p>
     <p v-if="error" style="color: red">{{ error }}</p>
 
     <div v-if="!loading && !error">
-      <!-- График -->
       <div class="card">
         <Bar
           :data="chartData"
@@ -202,26 +210,34 @@ onMounted(load);
                 class="sortable"
                 @click="toggleSort(k)"
               >
-                {{ k }}
-                <span v-if="sortKey === k">({{ sortDir }})</span>
+                {{ k }} <span v-if="sortKey === k">({{ sortDir }})</span>
               </th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(row, idx) in rows" :key="idx">
-              <td v-for="k in keys" :key="k">{{ row?.[k] }}</td>
+              <td v-for="k in keys" :key="k">
+                {{
+                  k === "total_price"
+                    ? Number(row?.[k] ?? 0).toLocaleString()
+                    : row?.[k]
+                }}
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
 
+      <p v-if="!rows.length" style="opacity: 0.7">
+        Нет данных за выбранный период.
+      </p>
+
       <div class="pagi">
         <button :disabled="page <= 1" @click="prevPage">« Prev</button>
         <span>Page {{ page }}</span>
-        <button @click="nextPage">Next »</button>
+        <button :disabled="isLastPage" @click="nextPage">Next »</button>
       </div>
 
-      <!-- Отладочный вывод сырого ответа -->
       <details style="margin-top: 12px">
         <summary>Debug response</summary>
         <pre>{{ JSON.stringify(raw, null, 2) }}</pre>
@@ -276,5 +292,26 @@ th.sortable {
 }
 button {
   padding: 6px 10px;
+}
+.spinner {
+  position: relative;
+  padding-left: 28px;
+}
+.spinner::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #ccc;
+  border-top-color: #111;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

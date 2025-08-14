@@ -27,6 +27,7 @@ const search = ref("");
 const sortKey = ref("");
 const sortDir = ref("asc");
 const keys = computed(() => (list.value[0] ? Object.keys(list.value[0]) : []));
+const isLastPage = computed(() => list.value.length < limit.value);
 
 function getDay(r) {
   return (
@@ -66,8 +67,10 @@ function prevPage() {
   }
 }
 function nextPage() {
-  page.value++;
-  load();
+  if (!isLastPage.value) {
+    page.value++;
+    load();
+  }
 }
 function toggleSort(k) {
   sortKey.value === k
@@ -106,21 +109,18 @@ const rows = computed(() => {
 });
 
 const chartData = computed(() => {
-  const numericKey = pickNumericKey(rows.value);
+  const metric = pickNumericKey(rows.value);
   const map = new Map();
   for (const r of rows.value) {
     const day = getDay(r);
-    const val = numericKey ? Number(r?.[numericKey]) || 0 : 1;
+    const val = metric ? Number(r?.[metric]) || 0 : 1;
     map.set(day, (map.get(day) ?? 0) + val);
   }
+  const labels = [...map.keys()].sort();
+  const data = labels.map((d) => map.get(d));
   return {
-    labels: [...map.keys()],
-    datasets: [
-      {
-        label: numericKey ? `Сумма по ${numericKey}` : "Количество",
-        data: [...map.values()],
-      },
-    ],
+    labels,
+    datasets: [{ label: metric ? `Сумма по ${metric}` : "Количество", data }],
   };
 });
 
@@ -132,6 +132,17 @@ onMounted(load);
     <h2>Stocks</h2>
     <div class="filters">
       <label>Дата: <input type="date" v-model="dateFrom" /></label>
+
+      <button
+        @click="
+          dateFrom = dayjs().format('YYYY-MM-DD');
+          page = 1;
+          load();
+        "
+      >
+        Сегодня
+      </button>
+
       <label
         >Limit:
         <select v-model.number="limit">
@@ -142,6 +153,7 @@ onMounted(load);
           <option :value="500">500</option>
         </select>
       </label>
+
       <input
         class="search"
         placeholder="Поиск…"
@@ -161,7 +173,7 @@ onMounted(load);
       </button>
     </div>
 
-    <p v-if="loading">Загрузка…</p>
+    <p v-if="loading" class="spinner">Загрузка…</p>
     <p v-if="error" style="color: red">{{ error }}</p>
 
     <div v-if="!loading && !error">
@@ -172,6 +184,7 @@ onMounted(load);
           style="height: 320px"
         />
       </div>
+
       <p>
         Найдено записей (на этой странице): <b>{{ rows.length }}</b>
       </p>
@@ -198,11 +211,16 @@ onMounted(load);
         </table>
       </div>
 
+      <p v-if="!rows.length" style="opacity: 0.7">
+        Нет данных на выбранную дату.
+      </p>
+
       <div class="pagi">
-        <button :disabled="page <= 1" @click="prevPage">« Prev</button
-        ><span>Page {{ page }}</span
-        ><button @click="nextPage">Next »</button>
+        <button :disabled="page <= 1" @click="prevPage">« Prev</button>
+        <span>Page {{ page }}</span>
+        <button :disabled="isLastPage" @click="nextPage">Next »</button>
       </div>
+
       <details style="margin-top: 12px">
         <summary>Debug response</summary>
         <pre>{{ JSON.stringify(raw, null, 2) }}</pre>
@@ -212,7 +230,6 @@ onMounted(load);
 </template>
 
 <style scoped>
-/* стили как в других страницах */
 .filters {
   display: flex;
   gap: 12px;
@@ -258,5 +275,26 @@ th.sortable {
 }
 button {
   padding: 6px 10px;
+}
+.spinner {
+  position: relative;
+  padding-left: 28px;
+}
+.spinner::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #ccc;
+  border-top-color: #111;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>
