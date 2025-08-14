@@ -1,0 +1,12 @@
+# Прокси: с фронта вызываем /api/* → Netlify пробрасывает на бекенд
+[[redirects]]
+  from = "/api/*"
+  to = "http://109.73.206.144:6969/api/:splat"
+  status = 200
+  force = true
+
+# SPA-фолбэк, чтобы /orders /sales и т.д. работали по прямым ссылкам
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
